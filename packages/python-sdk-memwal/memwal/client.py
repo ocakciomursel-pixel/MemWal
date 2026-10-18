@@ -434,6 +434,7 @@ class MemWal:
         # Preserve a generated key across an ambiguous transport failure. A
         # subsequent identical call then collapses onto the accepted paid job.
         self._pending_remember_keys: Dict[str, str] = {}
+        self._destroyed = False
 
     @classmethod
     def create(
@@ -474,6 +475,20 @@ class MemWal:
         if self._client is None or self._client.is_closed:
             self._client = httpx.AsyncClient(timeout=60.0)
         return self._client
+
+    def destroy(self) -> None:
+        """Securely wipe the private key and signer from memory.
+
+        Prevents key extraction from heap or core dumps. Once destroyed,
+        subsequent requests and key access will raise :class:`MemWalError`.
+        """
+        self._destroyed = True
+        self._private_key_hex = ""
+        self._signing_key = None
+        self._session_cache = None
+        self._server_config = None
+        self._relayer_version_metadata = None
+        self._pending_remember_keys.clear()
 
     async def close(self) -> None:
         """Close the underlying HTTP client."""
@@ -1471,6 +1486,8 @@ class MemWal:
         Returns:
             Public key hex string.
         """
+        if self._destroyed or self._signing_key is None:
+            raise MemWalError("Walrus Memory client was destroyed; its keys are wiped.")
         return bytes_to_hex(bytes(self._signing_key.verify_key))
 
     # ============================================================
@@ -1729,6 +1746,8 @@ class MemWal:
             - ``x-account-id``: Walrus Memory account object ID
             - ``Content-Type``: application/json
         """
+        if self._destroyed or self._signing_key is None:
+            raise MemWalError("Walrus Memory client was destroyed; its keys are wiped.")
 
         await self._ensure_compatible_relayer()
 
@@ -1740,6 +1759,9 @@ class MemWal:
         # message. Server rejects the request as "unsupported legacy SDK"
         # (HTTP 426) if x-nonce is missing or not UUID-formatted.
         nonce = str(uuid.uuid4())
+
+        if self._destroyed or self._signing_key is None:
+            raise MemWalError("Walrus Memory client was destroyed; its keys are wiped.")
 
         message = build_signature_message(
             timestamp,
@@ -2201,6 +2223,10 @@ class MemWalSync:
     def get_public_key_hex(self) -> str:
         """Synchronous version of :meth:`MemWal.get_public_key_hex`."""
         return self._run(self._inner.get_public_key_hex())
+
+    def destroy(self) -> None:
+        """Synchronous version of :meth:`MemWal.destroy`."""
+        self._inner.destroy()
 
     def close(self) -> None:
         """Close the underlying HTTP client."""
