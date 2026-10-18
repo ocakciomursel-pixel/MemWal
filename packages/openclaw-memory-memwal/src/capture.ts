@@ -76,7 +76,7 @@ const TRIGGER_PATTERNS = [
   /[\w.-]+@[\w.-]+\.\w+/,
 ];
 
-/** Normalize text by stripping invisible/format characters, decomposing Unicode, and mapping confusable scripts. */
+/** Normalize text by stripping invisible/format characters, decomposing Unicode, mapping confusable scripts, and collapsing letter-spaced words. */
 export function normalizeForInjectionCheck(text: string): string {
   const noInvisible = text.replace(/[\p{Cf}\p{Cc}\p{Co}\p{Cs}]/gu, "");
   const decomposed = noInvisible
@@ -87,7 +87,20 @@ export function normalizeForInjectionCheck(text: string): string {
   for (const char of decomposed) {
     mapped += VISUAL_CONFUSABLES[char] ?? char;
   }
-  return mapped.replace(/\s+/g, " ").trim();
+
+  // Collapse letter-spaced obfuscation (e.g. i-g-n-o-r-e, r.e.v.e.a.l, i g n o r e)
+  // 1. Punctuation separators between single characters (e.g., -, ., _, /, *, etc.)
+  let deobfuscated = mapped.replace(
+    /(?<=(?:^|[^a-zA-Z0-9])[a-zA-Z0-9])[ \t]*[-._•*~\\/:–—‑|][ \t]*(?=[a-zA-Z0-9](?:[^a-zA-Z0-9]|$))/gu,
+    ""
+  );
+  // 2. Single spaces between single letters (preserving multi-space word boundaries)
+  deobfuscated = deobfuscated.replace(
+    /(?<=(?:^|[^a-zA-Z0-9])[a-zA-Z0-9]) (?=[a-zA-Z0-9](?:[^a-zA-Z0-9]|$))/gu,
+    ""
+  );
+
+  return deobfuscated.replace(/\s+/g, " ").trim();
 }
 
 /** Check if text matches known prompt injection patterns. */
