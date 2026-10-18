@@ -23,7 +23,7 @@ export {
 } from "./compatibility.js";
 
 // Delegate key utilities (no @mysten/sui dependency)
-export { delegateKeyToSuiAddress, delegateKeyToPublicKey } from "./utils.js";
+export { delegateKeyToSuiAddress, delegateKeyToPublicKey, validateVector } from "./utils.js";
 // Request deadlines. `isTimeoutError` tells a blown budget apart from a
 // transport failure; `phase` says which round-trip blew it.
 export {

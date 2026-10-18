@@ -317,6 +317,22 @@ export function assertNonBlankText(text: string, message = "Text cannot be empty
     }
 }
 
+/**
+ * Validate that an embedding vector is a non-empty array of finite numbers.
+ * Rejects non-arrays, empty arrays, NaN, Infinity, -Infinity, and non-number types (#1211).
+ */
+export function validateVector(vector: unknown, fieldName = "vector"): asserts vector is number[] {
+    if (!Array.isArray(vector) || vector.length === 0) {
+        throw new TypeError(`${fieldName} must be a non-empty array of finite numbers`);
+    }
+    for (let i = 0; i < vector.length; i++) {
+        const val = vector[i];
+        if (typeof val !== "number" || !Number.isFinite(val)) {
+            throw new TypeError(`${fieldName} components must be finite numbers; element at index ${i} is ${val}`);
+        }
+    }
+}
+
 // ============================================================
 // Error Sanitization (LOW-26)
 // ============================================================
