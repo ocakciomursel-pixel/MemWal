@@ -138,6 +138,26 @@ def _reject_blank_text(text: object, message: str = "Text cannot be empty") -> N
         raise ValueError(message)
 
 
+def _validate_limit(limit: Any, name: str = "limit") -> int:
+    """Validate that limit is a non-negative integer."""
+    if isinstance(limit, bool) or not isinstance(limit, int):
+        raise ValueError(f"{name} must be a non-negative integer, got {limit!r}")
+    if limit < 0:
+        raise ValueError(f"{name} must be a non-negative integer, got {limit!r}")
+    return limit
+
+
+def _validate_vector(vector: Sequence[float], name: str = "vector") -> None:
+    """Validate that vector is a non-empty sequence of finite numbers."""
+    if not isinstance(vector, (list, tuple)):
+        raise TypeError(f"{name} must be a sequence of floats")
+    if not vector:
+        raise ValueError(f"{name} cannot be empty")
+    for i, val in enumerate(vector):
+        if isinstance(val, bool) or not isinstance(val, (int, float)) or not math.isfinite(val):
+            raise ValueError(f"{name}[{i}] must be a finite number, got {val!r}")
+
+
 IDEMPOTENCY_BUCKET_MS = 30 * 60 * 1000
 
 
@@ -1045,6 +1065,17 @@ class MemWal:
             max_distance = params.max_distance
         else:
             query_text = query
+        limit = _validate_limit(limit, "limit")
+        if max_distance is not None:
+            if (
+                isinstance(max_distance, bool)
+                or not isinstance(max_distance, (int, float))
+                or not math.isfinite(max_distance)
+                or max_distance < 0
+            ):
+                raise ValueError(
+                    f"max_distance must be a non-negative finite number, got {max_distance!r}"
+                )
         data = await self._signed_request("POST", "/api/recall", {
             "query": query_text,
             "limit": limit,
@@ -1216,6 +1247,7 @@ class MemWal:
         Returns:
             :class:`AskResult` with answer, memories_used count, and memories list.
         """
+        limit = _validate_limit(limit, "limit")
         data = await self._signed_request("POST", "/api/ask", {
             "question": question,
             "limit": limit,
@@ -1282,6 +1314,7 @@ class MemWal:
               downloads in parallel, then 3 SEAL decrypts in parallel, then
               embeddings. Expect seconds-per-blob on cold caches.
         """
+        limit = _validate_limit(limit, "limit")
         data = await self._signed_request("POST", "/api/restore", {
             "namespace": namespace,
             "limit": limit,
@@ -1337,6 +1370,9 @@ class MemWal:
         Returns:
             :class:`NamespacesResult`.
         """
+        if limit is not None:
+            limit = _validate_limit(limit, "limit")
+
         owner = await self._resolve_owner()
 
         params: Dict[str, str] = {}
@@ -1411,12 +1447,13 @@ class MemWal:
         Returns:
             :class:`RememberManualResult` with id, blob_id, owner, namespace.
         """
+        _validate_vector(opts.vector, "vector")
         data = await self._signed_request(
             "POST",
             "/api/remember/manual",
             {
                 "encrypted_data": opts.encrypted_data,
-                "vector": opts.vector,
+                "vector": list(opts.vector),
                 "namespace": opts.namespace or self._namespace,
             },
             include_seal_session=False,
@@ -1440,9 +1477,11 @@ class MemWal:
         Returns:
             :class:`RecallManualResult` with blob_id + distance pairs.
         """
+        _validate_vector(opts.vector, "vector")
+        limit = _validate_limit(opts.limit, "limit") if opts.limit is not None else 10
         body: Dict[str, Any] = {
-            "vector": opts.vector,
-            "limit": opts.limit,
+            "vector": list(opts.vector),
+            "limit": limit,
             "namespace": opts.namespace or self._namespace,
         }
         if opts.scoring_weights is not None:
@@ -1734,7 +1773,11 @@ class MemWal:
 
         method_upper = method.upper()
         timestamp = str(int(time.time()))
-        body_str = "" if method_upper == "GET" else json.dumps(body, separators=(",", ":"))
+        body_str = (
+            ""
+            if method_upper == "GET"
+            else json.dumps(body, separators=(",", ":"), allow_nan=False)
+        )
         body_hash = sha256_hex(body_str)
         # MED-1 / LOW-23: nonce + account_id are part of the canonical signed
         # message. Server rejects the request as "unsupported legacy SDK"
