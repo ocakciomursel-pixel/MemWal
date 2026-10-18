@@ -189,6 +189,8 @@ export async function POST(request: Request) {
     const stream = createUIMessageStream({
       originalMessages: isToolApprovalFlow ? uiMessages : undefined,
       execute: async ({ writer: dataStream }) => {
+        const memwalAutoSave = process.env.MEMWAL_AUTO_SAVE === "true";
+
         const result = streamText({
           model: useMemWal !== false
             ? getMemWalModel(selectedChatModel, {
@@ -210,7 +212,7 @@ export async function POST(request: Request) {
               "createDocument",
               "updateDocument",
               "requestSuggestions",
-              "saveMemory",
+              ...(!memwalAutoSave ? ["saveMemory"] : []),
             ],
           providerOptions: isReasoningModel
             ? {
@@ -224,11 +226,13 @@ export async function POST(request: Request) {
             createDocument: createDocument({ session, dataStream }),
             updateDocument: updateDocument({ session, dataStream }),
             requestSuggestions: requestSuggestions({ session, dataStream }),
-            saveMemory: saveMemory({
-              namespace: memoryNamespace,
-              memwalKey,
-              memwalAccountId,
-            }),
+            ...(!memwalAutoSave ? {
+              saveMemory: saveMemory({
+                namespace: memoryNamespace,
+                memwalKey,
+                memwalAccountId,
+              }),
+            } : {}),
           },
           experimental_telemetry: {
             isEnabled: isProductionEnvironment,
