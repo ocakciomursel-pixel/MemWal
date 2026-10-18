@@ -476,7 +476,23 @@ class MemWal:
         return self._client
 
     async def close(self) -> None:
-        """Close the underlying HTTP client."""
+        """Close the underlying HTTP client and cancel pending background tasks."""
+        if self._session_build_task is not None and not self._session_build_task.done():
+            self._session_build_task.cancel()
+            try:
+                await self._session_build_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            self._session_build_task = None
+
+        if self._owner_task is not None and not self._owner_task.done():
+            self._owner_task.cancel()
+            try:
+                await self._owner_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            self._owner_task = None
+
         if self._client is not None and not self._client.is_closed:
             await self._client.aclose()
             self._client = None
@@ -1655,14 +1671,20 @@ class MemWal:
             if now_ms < expires_at_ms:
                 return cached_bytes
 
-        if self._session_build_task is not None:
-            return await self._session_build_task
+        if self._session_build_task is None or self._session_build_task.done():
+            task = asyncio.create_task(self._build_seal_session_inner())
+            self._session_build_task = task
 
-        self._session_build_task = asyncio.create_task(self._build_seal_session_inner())
-        try:
-            return await self._session_build_task
-        finally:
-            self._session_build_task = None
+            def _on_done(t: asyncio.Task[str]) -> None:
+                if self._session_build_task is t:
+                    self._session_build_task = None
+                # Retrieve exception if any to avoid 'Task exception was never retrieved'
+                if not t.cancelled():
+                    _ = t.exception()
+
+            task.add_done_callback(_on_done)
+
+        return await asyncio.shield(self._session_build_task)
 
     async def _resolve_owner_inner(self) -> str:
         # POST /api/stats authenticates with the same delegate scheme and
@@ -1692,14 +1714,19 @@ class MemWal:
         if self._owner_address is not None:
             return self._owner_address
 
-        if self._owner_task is not None:
-            return await self._owner_task
+        if self._owner_task is None or self._owner_task.done():
+            task = asyncio.create_task(self._resolve_owner_inner())
+            self._owner_task = task
 
-        self._owner_task = asyncio.create_task(self._resolve_owner_inner())
-        try:
-            return await self._owner_task
-        finally:
-            self._owner_task = None
+            def _on_done(t: asyncio.Task[str]) -> None:
+                if self._owner_task is t:
+                    self._owner_task = None
+                if not t.cancelled():
+                    _ = t.exception()
+
+            task.add_done_callback(_on_done)
+
+        return await asyncio.shield(self._owner_task)
 
     async def _signed_request(
         self,
