@@ -173,6 +173,12 @@ async function readSuccessJson<T>(res: Response): Promise<T> {
 const SEAL_SESSION_TTL_MIN = 5;
 const SEAL_SESSION_SAFETY_MARGIN_MS = 30_000;
 
+function destroyedClientError(): Error {
+    return new Error(
+        "Walrus Memory client was destroyed; its keys are zeroed. Create a new one.",
+    );
+}
+
 export class MemWalManual {
     private delegatePrivateKey: Uint8Array;
     private delegatePublicKey: Uint8Array | null = null;
@@ -186,6 +192,7 @@ export class MemWalManual {
     private preflightTimeoutMs: number;
     private sessionCache: { bytes: string; expiresAt: number } | null = null;
     private sessionBuildPromise: Promise<string> | null = null;
+    private destroyed = false;
 
     // Lazily initialized heavy clients (typed as any to avoid peer dep compile errors)
     private _suiClient: any = null;
@@ -199,16 +206,19 @@ export class MemWalManual {
         if (config.suiPrivateKey && config.walletSigner) {
             throw new Error("MemWalManual: provide suiPrivateKey OR walletSigner, not both");
         }
-        this.delegatePrivateKey =
+        const rawKey =
             typeof config.key === "string"
                 ? hexToBytes(normalizePrivateKey(config.key))
                 : config.key;
-        if (!(this.delegatePrivateKey instanceof Uint8Array) || this.delegatePrivateKey.length !== 32) {
-            const got = this.delegatePrivateKey instanceof Uint8Array
-                ? String(this.delegatePrivateKey.length)
-                : typeof this.delegatePrivateKey;
+        if (!(rawKey instanceof Uint8Array) || rawKey.length !== 32) {
+            const got = rawKey instanceof Uint8Array
+                ? String(rawKey.length)
+                : typeof rawKey;
             throw new Error(`Ed25519 seed must be exactly 32 bytes, got ${got}`);
         }
+        // Make an internal copy so destroy() mutates our buffer, not the
+        // caller's (#973, #977).
+        this.delegatePrivateKey = new Uint8Array(rawKey);
         // LOW-22: default to HTTPS; warn (do not throw) on plaintext HTTP
         // against non-localhost hosts.
         this.serverUrl = normalizeServerUrl(config.serverUrl ?? "https://relayer.memory.walrus.xyz");
@@ -218,7 +228,7 @@ export class MemWalManual {
                 `MemWalManual.create: "accountId" is required (Walrus Memory object ID, e.g. 0x...); got ${config.accountId}`,
             );
         }
-        this.config = config;
+        this.config = { ...config };
         if (config.namespace !== undefined && !config.namespace) {
             throw new Error("namespace cannot be empty");
         }
@@ -245,16 +255,26 @@ export class MemWalManual {
     }
 
     /**
-     * Securely wipe the delegate private and public keys from memory.
-     * Prevents key extraction from V8 heap dumps.
+     * Securely wipe the delegate private and public keys, Sui private key, and
+     * embedding API key from memory. Prevents key extraction from V8 heap dumps.
      */
     destroy(): void {
+        this.destroyed = true;
         if (this.delegatePrivateKey) {
             this.delegatePrivateKey.fill(0);
         }
         if (this.delegatePublicKey) {
             this.delegatePublicKey.fill(0);
         }
+        if (this.config) {
+            delete (this.config as any).key;
+            delete (this.config as any).suiPrivateKey;
+            delete (this.config as any).embeddingApiKey;
+        }
+        this._keypair = null;
+        this._suiClient = null;
+        this._sealClient = null;
+        this.walletSigner = null;
         this.relayerVersionMetadata = null;
         this.compatibilityPromise = null;
         this.sessionCache = null;
@@ -267,6 +287,7 @@ export class MemWalManual {
      * Memoised until 30s before expiration (5m TTL).
      */
     async buildSealSession(): Promise<string> {
+        if (this.destroyed) throw destroyedClientError();
         // Fast path: cached session still fresh.
         if (this.sessionCache && Date.now() < this.sessionCache.expiresAt) {
             return this.sessionCache.bytes;
@@ -281,14 +302,18 @@ export class MemWalManual {
     }
 
     private async buildSealSessionInner(): Promise<string> {
+        if (this.destroyed) throw destroyedClientError();
         // Same key MemWal uses. An owner wallet session prompts on every
         // refresh and is broader than the delegate this client already holds.
         // Dynamic imports: @mysten/sui and @mysten/seal are optional peers.
         // Server-mode MemWal must still load when they are not installed.
         const { Ed25519Keypair } = await import("@mysten/sui/keypairs/ed25519");
+        if (this.destroyed) throw destroyedClientError();
         const keypair = Ed25519Keypair.fromSecretKey(this.delegatePrivateKey);
         const suiClient = await this.getSuiClient();
+        if (this.destroyed) throw destroyedClientError();
         const { SessionKey } = await import("@mysten/seal");
+        if (this.destroyed) throw destroyedClientError();
 
         const session = await SessionKey.create({
             address: keypair.getPublicKey().toSuiAddress(),
@@ -357,12 +382,18 @@ export class MemWalManual {
     }
 
     private async getKeypair() {
+        if (this.destroyed) throw destroyedClientError();
         if (this.walletSigner) {
             throw new Error("getKeypair() not available in wallet signer mode");
         }
         if (!this._keypair) {
+            if (!this.config?.suiPrivateKey) {
+                throw new Error("MemWalManual: suiPrivateKey was wiped or missing");
+            }
             const { decodeSuiPrivateKey } = await import("@mysten/sui/cryptography");
+            if (this.destroyed) throw destroyedClientError();
             const { Ed25519Keypair } = await import("@mysten/sui/keypairs/ed25519");
+            if (this.destroyed) throw destroyedClientError();
             const { secretKey } = decodeSuiPrivateKey(this.config.suiPrivateKey!);
             this._keypair = Ed25519Keypair.fromSecretKey(secretKey);
         }
@@ -421,6 +452,7 @@ export class MemWalManual {
      * 3. Send {encrypted_data, vector} to server — server handles Walrus upload relay
      */
     async rememberManual(text: string, namespace?: string): Promise<RememberManualResult> {
+        if (this.destroyed) throw destroyedClientError();
         assertNonBlankText(text);
 
         const ns = namespace ?? this.namespace;
@@ -459,6 +491,7 @@ export class MemWalManual {
         limitOrOptions: number | MemWalManualRecallOptions = 10,
         namespace?: string
     ): Promise<RecallManualMemoryResult> {
+        if (this.destroyed) throw destroyedClientError();
         if (!query.trim()) throw new Error("Query cannot be empty");
 
         const options = resolveLimitOrOptions(
@@ -650,7 +683,8 @@ export class MemWalManual {
     // ============================================================
 
     private async embed(text: string): Promise<number[]> {
-        if (!this.config.embeddingApiKey) {
+        if (this.destroyed) throw destroyedClientError();
+        if (!this.config?.embeddingApiKey) {
             throw new Error(
                 "MemWalManual: embeddingApiKey is required. " + "Provide your OpenAI or OpenRouter API key in config."
             );
@@ -841,9 +875,12 @@ export class MemWalManual {
     // ============================================================
 
     private async getDelegatePublicKey(): Promise<Uint8Array> {
+        if (this.destroyed) throw destroyedClientError();
         if (!this.delegatePublicKey) {
             const ed = await import("@noble/ed25519");
+            if (this.destroyed) throw destroyedClientError();
             this.delegatePublicKey = await ed.getPublicKeyAsync(this.delegatePrivateKey);
+            if (this.destroyed) throw destroyedClientError();
         }
         return this.delegatePublicKey;
     }
@@ -908,8 +945,11 @@ export class MemWalManual {
         body: object,
         options: { timeoutMs?: number; signal?: AbortSignal; includeSealSession?: boolean } = {},
     ): Promise<T> {
+        if (this.destroyed) throw destroyedClientError();
         await this.ensureCompatibleRelayer();
+        if (this.destroyed) throw destroyedClientError();
         const ed = await import("@noble/ed25519");
+        if (this.destroyed) throw destroyedClientError();
 
         const timestamp = Math.floor(Date.now() / 1000).toString();
         const bodyStr = JSON.stringify(body);
@@ -924,7 +964,9 @@ export class MemWalManual {
         const msgBytes = new TextEncoder().encode(message);
 
         const signature = await ed.signAsync(msgBytes, this.delegatePrivateKey);
+        if (this.destroyed) throw destroyedClientError();
         const publicKey = await this.getDelegatePublicKey();
+        if (this.destroyed) throw destroyedClientError();
 
         const headers: Record<string, string> = {
             "Content-Type": "application/json",
@@ -1006,6 +1048,7 @@ export class MemWalManual {
      * @returns RestoreResult with count of restored entries
      */
     async restore(namespace: string, limit: number = 10): Promise<RestoreResult> {
+        if (this.destroyed) throw destroyedClientError();
         if (typeof limit !== "number" || !Number.isInteger(limit) || limit <= 0) {
             throw new TypeError(
                 `limit must be a positive integer, got ${limit}`,
