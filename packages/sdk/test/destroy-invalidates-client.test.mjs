@@ -41,3 +41,36 @@ test("a request in flight when destroy() lands is rejected, not signed with a ze
         globalThis.fetch = originalFetch;
     }
 });
+
+test("destroy() wipes internal private key without mutating the caller-owned Uint8Array buffer (#973)", () => {
+    const callerKey = new Uint8Array(32).fill(7);
+    const client = MemWal.create({
+        key: callerKey,
+        accountId: "0x1",
+        serverUrl: "https://relayer.example",
+    });
+
+    client.destroy();
+
+    assert.equal(callerKey[0], 7);
+    assert.equal(callerKey[31], 7);
+    assert.deepEqual(callerKey, new Uint8Array(32).fill(7));
+});
+
+test("MemWalManual.destroy() wipes internal private key without mutating caller-owned Uint8Array buffer (#973)", async () => {
+    const { MemWalManual } = await import("../dist/manual.js");
+    const callerKey = new Uint8Array(32).fill(7);
+    const client = MemWalManual.create({
+        key: callerKey,
+        suiPrivateKey: "suiprivkey1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqghl68a",
+        accountId: "0x1",
+        serverUrl: "https://relayer.example",
+    });
+
+    client.destroy();
+
+    assert.equal(callerKey[0], 7);
+    assert.equal(callerKey[31], 7);
+    assert.deepEqual(callerKey, new Uint8Array(32).fill(7));
+});
+
