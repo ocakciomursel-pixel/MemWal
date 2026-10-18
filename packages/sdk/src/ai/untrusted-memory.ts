@@ -14,6 +14,19 @@ function randomBoundaryNonce(): string {
 }
 
 /**
+ * Compute bounded relevance [0.00, 1.00] from distance.
+ * Rejects non-finite values (undefined, NaN, Infinity) by defaulting to 0,
+ * and clamps raw (1 - distance) to [0, 1] so negative or excessive distances
+ * cannot corrupt display or bypass relevance gates (#976).
+ */
+export function computeRelevance(distance: unknown): number {
+    if (typeof distance !== "number" || !Number.isFinite(distance)) {
+        return 0;
+    }
+    return Math.min(1, Math.max(0, 1 - distance));
+}
+
+/**
  * Serialize recalled text as untrusted data behind a fresh, unpredictable
  * request boundary. JSON encoding prevents memory-controlled newlines from
  * changing the surrounding record structure. The nonce is generated only
@@ -32,7 +45,7 @@ export function formatUntrustedMemories(
     const records = memories.map((memory) =>
         JSON.stringify({
             text: memory.text,
-            relevance: (1 - memory.distance).toFixed(2),
+            relevance: computeRelevance(memory.distance).toFixed(2),
         })
     );
 
