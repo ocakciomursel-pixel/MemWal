@@ -68,6 +68,7 @@ import {
     normalizePrivateKey,
     normalizeServerUrl,
     assertNonBlankText,
+    validateVector,
     sanitizeServerError,
     redactInternalUrls,
     clockDriftErrorFromResponse,
@@ -1278,6 +1279,16 @@ export class MemWal {
      * ```
      */
     async rememberManual(opts: RememberManualOptions): Promise<RememberManualResult> {
+        if (!opts || typeof opts !== "object") {
+            throw new TypeError("rememberManual: options must be an object");
+        }
+        if (typeof opts.encryptedData !== "string" || opts.encryptedData.trim().length === 0) {
+            throw new TypeError("encryptedData must be a non-empty string");
+        }
+        validateVector(opts.vector, "vector");
+        if (opts.namespace !== undefined && !opts.namespace) {
+            throw new Error("namespace cannot be empty");
+        }
         return this.signedRequest<RememberManualResult>(
             "POST",
             "/api/remember/manual",
@@ -1321,11 +1332,26 @@ export class MemWal {
      * ```
      */
     async recallManual(opts: RecallManualOptions): Promise<RecallManualHitResult> {
+        if (!opts || typeof opts !== "object") {
+            throw new TypeError("recallManual: options must be an object");
+        }
+        validateVector(opts.vector, "vector");
         const limit = opts.limit !== undefined ? opts.limit : 10;
         if (typeof limit !== "number" || !Number.isInteger(limit) || limit <= 0) {
             throw new TypeError(
                 `limit must be a positive integer, got ${limit}`,
             );
+        }
+        if (opts.namespace !== undefined && !opts.namespace) {
+            throw new Error("namespace cannot be empty");
+        }
+        const weights = opts.scoringWeights;
+        if (weights) {
+            for (const [name, value] of Object.entries(weights)) {
+                if (value !== undefined && (typeof value !== "number" || !Number.isFinite(value))) {
+                    throw new Error(`scoringWeights.${name} must be a finite number`);
+                }
+            }
         }
         return this.signedRequest<RecallManualHitResult>(
             "POST",
