@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { SponsorHttpError, sponsorFailureMessage } from './useSponsoredTransaction'
+import { SponsorHttpError, sponsorFailureMessage, validateRelayerPackageId } from './useSponsoredTransaction'
 
 describe('SponsorHttpError', () => {
     it('parses the relayer error envelope', () => {
@@ -95,5 +95,18 @@ describe('sponsorFailureMessage', () => {
 
     it('reports network failures distinctly', () => {
         expect(sponsorFailureMessage(new TypeError('Failed to fetch'))).toContain('Network error')
+    })
+})
+
+describe('validateRelayerPackageId', () => {
+    it('warns when relayer packageId does not match expected packageId', async () => {
+        const originalFetch = globalThis.fetch
+        globalThis.fetch = async () => new Response(JSON.stringify({ packageId: '0xe7c16f' }), { status: 200 })
+        try {
+            const warning = await validateRelayerPackageId('http://relayer.test', '0x0a625e')
+            expect(warning).toContain('Package ID mismatch')
+        } finally {
+            globalThis.fetch = originalFetch
+        }
     })
 })
