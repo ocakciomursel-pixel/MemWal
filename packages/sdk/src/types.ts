@@ -373,6 +373,21 @@ export interface AnalyzeWaitResult extends RememberBulkResult {
     owner: string;
 }
 
+/**
+ * Result of {@link MemWal.whoami} – the server-resolved identity for the
+ * delegate key that was used to initialise this client.
+ *
+ * Returned by `GET /api/whoami`.
+ */
+export interface WhoamiResult {
+    /** On-chain account ID (`0x…`). */
+    accountId: string;
+    /** Owner (sponsor) address that controls the account (`0x…`). */
+    owner: string;
+    /** Walrus Memory package ID (`0x…`). */
+    packageId: string;
+}
+
 /** Server health response */
 export interface HealthResult extends Partial<RelayerVersionMetadata> {
     status: string;
