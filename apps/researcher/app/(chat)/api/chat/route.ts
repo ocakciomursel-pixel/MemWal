@@ -299,6 +299,7 @@ export async function POST(request: Request) {
             if (existingMsg) {
               await updateMessage({
                 id: finishedMsg.id,
+                chatId: id,
                 parts: finishedMsg.parts,
               });
             } else {
