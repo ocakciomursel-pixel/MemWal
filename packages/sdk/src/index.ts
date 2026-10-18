@@ -68,6 +68,7 @@ export type {
     AnalyzeWaitResult,
     AnalyzedFact,
     HealthResult,
+    WhoamiResult,
     RestoreResult,
     RememberBulkItem,
     RememberBulkOptions,

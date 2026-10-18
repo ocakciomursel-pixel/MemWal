@@ -60,6 +60,7 @@ import type {
     RememberBulkStatusItem,
     RememberBulkItemResult,
     RelayerVersionMetadata,
+    WhoamiResult,
 } from "./types.js";
 import {
     sha256hex,
@@ -1613,6 +1614,39 @@ export class MemWal {
         });
 
         return this.ownerPromise;
+    }
+
+    /**
+     * Validate the delegate key and resolve the on-chain identity associated
+     * with it.
+     *
+     * Calls `GET /api/whoami` (authenticated with the configured delegate key).
+     * This is the recommended way to verify that a key is properly registered
+     * before starting a long-running workflow, or to surface the account ID
+     * without needing to call {@link remember} or {@link recall} first.
+     *
+     * @example
+     * ```typescript
+     * const identity = await memwal.whoami();
+     * console.log(identity.accountId);  // "0x…"
+     * console.log(identity.owner);      // "0x…"
+     * console.log(identity.packageId);  // "0x…"
+     * ```
+     *
+     * @returns The server-resolved identity for this delegate key.
+     * @throws If the delegate key is not registered or the request fails.
+     */
+    async whoami(): Promise<WhoamiResult> {
+        const raw = await this.signedRequest<{
+            account_id: string;
+            owner: string;
+            package_id: string;
+        }>("GET", "/api/whoami", {}, [200], { includeDelegateKey: false });
+        return {
+            accountId: raw.account_id,
+            owner: raw.owner,
+            packageId: raw.package_id,
+        };
     }
 
     /**
