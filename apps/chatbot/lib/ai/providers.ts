@@ -109,13 +109,15 @@ export function getMemWalModel(
     return baseModel;
   }
 
+  const autoSave = process.env.MEMWAL_AUTO_SAVE === "true";
+
   return withMemWal(baseModel, {
     key,
     accountId,
     serverUrl: memwalServerUrl || "http://localhost:8000",
     namespace,
     maxMemories: 5,
-    autoSave: true,
+    autoSave,
     minRelevance: 0,
     debug: true,
   });

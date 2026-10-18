@@ -70,7 +70,7 @@ describe("chatbot memory namespace isolation", () => {
     );
   });
 
-  it("binds automatic recall and auto-save middleware to the user namespace", async () => {
+  it("binds automatic recall and configures autoSave to false by default to prevent duplicate writes with saveMemory (#1098)", async () => {
     const { getMemWalModel } = await import("./providers");
     const namespace = memoryNamespaceForUser(USER_A)!;
 
@@ -82,8 +82,35 @@ describe("chatbot memory namespace isolation", () => {
 
     expect(mocks.withMemWal).toHaveBeenCalledOnce();
     expect(mocks.withMemWal.mock.calls[0][1]).toEqual(
-      expect.objectContaining({ namespace })
+      expect.objectContaining({
+        namespace,
+        autoSave: false,
+      })
     );
+  });
+
+  it("enables autoSave when MEMWAL_AUTO_SAVE is explicitly configured (#1098)", async () => {
+    const { getMemWalModel } = await import("./providers");
+    const namespace = memoryNamespaceForUser(USER_B)!;
+
+    process.env.MEMWAL_AUTO_SAVE = "true";
+    try {
+      getMemWalModel("openai/gpt-4o", {
+        namespace,
+        memwalKey: KEY,
+        memwalAccountId: ACCOUNT_ID,
+      });
+
+      expect(mocks.withMemWal).toHaveBeenCalledOnce();
+      expect(mocks.withMemWal.mock.calls[0][1]).toEqual(
+        expect.objectContaining({
+          namespace,
+          autoSave: true,
+        })
+      );
+    } finally {
+      delete process.env.MEMWAL_AUTO_SAVE;
+    }
   });
 
   it("wires the authenticated session namespace into both chatbot memory paths", () => {
