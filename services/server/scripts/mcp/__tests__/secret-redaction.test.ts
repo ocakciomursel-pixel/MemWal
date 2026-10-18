@@ -745,3 +745,29 @@ test("a clean passage is forwarded byte-for-byte", () => {
     assert.deepEqual(out.dropped, []);
     assert.equal(droppedSpanNotice(out.dropped, out.segments), "");
 });
+
+test("sanitizeFact, sanitizeFactBatch, and sanitizePassage redact db_pass, encryption_key, and related labels (#1052)", () => {
+    const V = "hunter2-prod-9xQ";
+    for (const [label, text] of [
+        ["db_pass", `db_pass=${V}`],
+        ["dbpass", `dbpass=${V}`],
+        ["encryption_key", `encryption_key=${V}`],
+        ["enc_key", `enc_key=${V}`],
+        ["priv_key", `priv_key=${V}`],
+        ["privkey", `privkey=${V}`],
+        ["pass", `pass=${V}`],
+        ["DB_PASS", `DB_PASS=${V}`],
+        ["ENCRYPTION_KEY", `ENCRYPTION_KEY=${V}`],
+    ]) {
+        const out = sanitizeFact(text);
+        assert.ok(!out.text.includes(V), `${label} value was not redacted: ${text}`);
+        assert.ok(out.changed, `${label} was not marked changed`);
+    }
+
+    const batch = sanitizeFactBatch([`db_pass=${V}`, `encryption_key=${V}`]);
+    assert.ok(!batch[0].text.includes(V), "batch db_pass survived");
+    assert.ok(!batch[1].text.includes(V), "batch encryption_key survived");
+
+    const passage = sanitizePassage(`Here is db_pass=${V} and encryption_key=${V}`);
+    assert.ok(!passage.text.includes(V), "passage credentials survived");
+});
