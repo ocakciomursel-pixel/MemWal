@@ -492,7 +492,9 @@ export class MemWal {
         this.privateKey =
             typeof config.key === "string"
                 ? hexToBytes(normalizePrivateKey(config.key))
-                : config.key;
+                : config.key instanceof Uint8Array
+                    ? new Uint8Array(config.key)
+                    : config.key;
         if (!(this.privateKey instanceof Uint8Array) || this.privateKey.length !== 32) {
             const got = this.privateKey instanceof Uint8Array
                 ? String(this.privateKey.length)

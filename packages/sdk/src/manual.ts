@@ -202,7 +202,9 @@ export class MemWalManual {
         this.delegatePrivateKey =
             typeof config.key === "string"
                 ? hexToBytes(normalizePrivateKey(config.key))
-                : config.key;
+                : config.key instanceof Uint8Array
+                    ? new Uint8Array(config.key)
+                    : config.key;
         if (!(this.delegatePrivateKey instanceof Uint8Array) || this.delegatePrivateKey.length !== 32) {
             const got = this.delegatePrivateKey instanceof Uint8Array
                 ? String(this.delegatePrivateKey.length)
