@@ -109,6 +109,13 @@ export function getMemWalModel(
     return baseModel;
   }
 
+  const minRelevanceEnv = process.env.MEMWAL_MIN_RELEVANCE;
+  const minRelevance =
+    minRelevanceEnv !== undefined && !Number.isNaN(Number(minRelevanceEnv))
+      ? Number(minRelevanceEnv)
+      : 0.3;
+  const debug = process.env.MEMWAL_DEBUG === "true";
+
   return withMemWal(baseModel, {
     key,
     accountId,
@@ -116,7 +123,7 @@ export function getMemWalModel(
     namespace,
     maxMemories: 5,
     autoSave: true,
-    minRelevance: 0,
-    debug: true,
+    minRelevance,
+    debug,
   });
 }

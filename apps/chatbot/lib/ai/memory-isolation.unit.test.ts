@@ -70,7 +70,7 @@ describe("chatbot memory namespace isolation", () => {
     );
   });
 
-  it("binds automatic recall and auto-save middleware to the user namespace", async () => {
+  it("binds automatic recall and auto-save middleware to the user namespace with 0.3 minRelevance (#1099)", async () => {
     const { getMemWalModel } = await import("./providers");
     const namespace = memoryNamespaceForUser(USER_A)!;
 
@@ -82,8 +82,40 @@ describe("chatbot memory namespace isolation", () => {
 
     expect(mocks.withMemWal).toHaveBeenCalledOnce();
     expect(mocks.withMemWal.mock.calls[0][1]).toEqual(
-      expect.objectContaining({ namespace })
+      expect.objectContaining({
+        namespace,
+        minRelevance: 0.3,
+        debug: false,
+      })
     );
+  });
+
+  it("respects MEMWAL_MIN_RELEVANCE and MEMWAL_DEBUG environment variables (#1099)", async () => {
+    const { getMemWalModel } = await import("./providers");
+    const namespace = memoryNamespaceForUser(USER_B)!;
+
+    process.env.MEMWAL_MIN_RELEVANCE = "0.5";
+    process.env.MEMWAL_DEBUG = "true";
+
+    try {
+      getMemWalModel("openai/gpt-4o", {
+        namespace,
+        memwalKey: KEY,
+        memwalAccountId: ACCOUNT_ID,
+      });
+
+      expect(mocks.withMemWal).toHaveBeenCalledOnce();
+      expect(mocks.withMemWal.mock.calls[0][1]).toEqual(
+        expect.objectContaining({
+          namespace,
+          minRelevance: 0.5,
+          debug: true,
+        })
+      );
+    } finally {
+      delete process.env.MEMWAL_MIN_RELEVANCE;
+      delete process.env.MEMWAL_DEBUG;
+    }
   });
 
   it("wires the authenticated session namespace into both chatbot memory paths", () => {
