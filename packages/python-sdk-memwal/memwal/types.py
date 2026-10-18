@@ -8,6 +8,7 @@ the Walrus Memory Rust server (TEE).
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
@@ -149,6 +150,9 @@ class ScoringWeights:
             payload["recency_half_life_days"] = self.recency_half_life_days
         if self.importance is not None:
             payload["importance"] = self.importance
+        for k, v in payload.items():
+            if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):
+                raise ValueError(f"scoring_weight {k} must be a finite number, got {v!r}")
         return payload
 
 
