@@ -10,10 +10,30 @@ function parseCsv(value: string | undefined, fallback = '') {
         .filter(Boolean)
 }
 
-const memwalPackageId = import.meta.env.VITE_MEMWAL_PACKAGE_ID as string ||
-    '0x0a625e2db2af6f591a4c80a3d8551ddf11656089cc3a20c5e9e7f8fb75b9265c'
-const memwalRegistryId = import.meta.env.VITE_MEMWAL_REGISTRY_ID as string ||
-    '0x736aef9906798fca4460490ccdf8e8502ef170122dc26ecae32111b78c6b42dd'
+export const DEFAULT_MAINNET_PACKAGE_ID = '0xe7c16fbea0560e7057e2bf7422feaa4fb313749fc69c9e9092fac7a33b81d7f5'
+export const DEFAULT_MAINNET_REGISTRY_ID = '0x8bf82c9e09e36b8d1c38298f68b7cb68e7b8762887e7592add9986d5e9cf199f'
+export const DEFAULT_TESTNET_PACKAGE_ID = '0x0a625e2db2af6f591a4c80a3d8551ddf11656089cc3a20c5e9e7f8fb75b9265c'
+export const DEFAULT_TESTNET_REGISTRY_ID = '0x736aef9906798fca4460490ccdf8e8502ef170122dc26ecae32111b78c6b42dd'
+
+const configuredNetwork = ((import.meta.env.VITE_SUI_NETWORK as string) || '').toLowerCase()
+const configuredServerUrl = ((import.meta.env.VITE_MEMWAL_SERVER_URL as string) || '').toLowerCase()
+const isMainnet = configuredNetwork === 'mainnet' || configuredServerUrl.includes('mainnet') || configuredServerUrl.includes('relayer.memory.walrus.xyz')
+
+const memwalPackageId = (import.meta.env.VITE_MEMWAL_PACKAGE_ID as string) ||
+    (isMainnet ? DEFAULT_MAINNET_PACKAGE_ID : DEFAULT_TESTNET_PACKAGE_ID)
+const memwalRegistryId = (import.meta.env.VITE_MEMWAL_REGISTRY_ID as string) ||
+    (isMainnet ? DEFAULT_MAINNET_REGISTRY_ID : DEFAULT_TESTNET_REGISTRY_ID)
+
+if (!import.meta.env.VITE_MEMWAL_PACKAGE_ID) {
+    console.warn(
+        `[Walrus Memory] VITE_MEMWAL_PACKAGE_ID is unset; defaulting to ${isMainnet ? 'mainnet' : 'testnet'} package ID: ${memwalPackageId}`
+    )
+}
+if (!import.meta.env.VITE_MEMWAL_REGISTRY_ID) {
+    console.warn(
+        `[Walrus Memory] VITE_MEMWAL_REGISTRY_ID is unset; defaulting to ${isMainnet ? 'mainnet' : 'testnet'} registry ID: ${memwalRegistryId}`
+    )
+}
 const sealKeyServers = parseCsv(import.meta.env.VITE_SEAL_KEY_SERVERS as string)
 const legacySealKeyServers = parseCsv(import.meta.env.VITE_LEGACY_SEAL_KEY_SERVERS as string)
 const localE2eJsonRpc = import.meta.env.DEV &&

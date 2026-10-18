@@ -119,6 +119,32 @@ export function sponsorFailureMessage(err: unknown): string {
     return err instanceof Error ? err.message : 'Transaction sponsorship failed. Please try again.'
 }
 
+let relayerPackageCheck: Promise<string | null> | null = null
+
+export async function fetchRelayerPackageId(serverUrl: string): Promise<string | null> {
+    try {
+        const res = await fetch(`${serverUrl.replace(/\/$/, '')}/config`)
+        if (!res.ok) return null
+        const data = await res.json()
+        return typeof data?.packageId === 'string' ? data.packageId : null
+    } catch {
+        return null
+    }
+}
+
+export async function validateRelayerPackageId(serverUrl: string, expectedPackageId: string): Promise<string | null> {
+    if (!relayerPackageCheck) {
+        relayerPackageCheck = fetchRelayerPackageId(serverUrl)
+    }
+    const actual = await relayerPackageCheck
+    if (actual && actual.toLowerCase() !== expectedPackageId.toLowerCase()) {
+        const msg = `[Walrus Memory] Package ID mismatch: the app is configured with ${expectedPackageId}, but the relayer at ${serverUrl} reported active package ${actual}. Transactions may be rejected for sponsorship.`
+        console.warn(msg)
+        return msg
+    }
+    return null
+}
+
 export function useSponsoredTransaction() {
     const currentAccount = useCurrentAccount()
     const suiClient = useSuiClient()
@@ -128,6 +154,8 @@ export function useSponsoredTransaction() {
     const mutateAsync = async ({ transaction }: { transaction: Transaction }): Promise<{ digest: string }> => {
         const sender = currentAccount?.address
         if (!sender) throw new Error('No wallet connected')
+
+        validateRelayerPackageId(config.memwalServerUrl, config.memwalPackageId).catch(() => {})
 
         // TransactionKind bytes never change across retries — build once.
         const kindBytes = await transaction.build({
