@@ -27,6 +27,7 @@ import { MemWal } from "../memwal.js";
 import type { MemWalConfig, RecallMemory } from "../types.js";
 import {
     formatUntrustedMemories,
+    computeRelevance,
     UNTRUSTED_MEMORY_SYSTEM_INSTRUCTION,
 } from "./untrusted-memory.js";
 
@@ -154,7 +155,7 @@ export function withMemWal(
 
                     const recallResult = await memwal.recall(lastUserMessage, maxMemories);
                     const relevant = recallResult.results.filter(
-                        (m: RecallMemory) => (1 - m.distance) >= minRelevance
+                        (m: RecallMemory) => computeRelevance(m.distance) >= minRelevance
                     );
                     if (relevant.length === 0) {
                         cachedRecall = { key: turnKey, context: "" };
