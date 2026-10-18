@@ -514,7 +514,7 @@ class MemWal:
             status (``"pending"``).
         """
         _reject_blank_text(text)
-        resolved_namespace = namespace or self._namespace
+        resolved_namespace = namespace if namespace is not None else self._namespace
         request_identity = f"{resolved_namespace}\0{text}"
         generated_key = idempotency_key is None
         resolved_key = (
@@ -692,7 +692,7 @@ class MemWal:
                     id=data.get("job_id", job_id),
                     blob_id=data.get("blob_id") or "",
                     owner=data.get("owner") or "",
-                    namespace=data.get("namespace") or self._namespace,
+                    namespace=data.get("namespace") if data.get("namespace") is not None else self._namespace,
                 )
 
             if status_str == "failed":
@@ -727,7 +727,7 @@ class MemWal:
         """
 
         _reject_blank_text(text)
-        resolved_namespace = namespace or self._namespace
+        resolved_namespace = namespace if namespace is not None else self._namespace
         request_identity = f"{resolved_namespace}\0{text}"
         generated_key = idempotency_key is None
         resolved_key = (
@@ -773,7 +773,7 @@ class MemWal:
         payload_items: List[Dict[str, Any]] = [
             {
                 "text": item.text,
-                "namespace": item.namespace or self._namespace,
+                "namespace": item.namespace if item.namespace is not None else self._namespace,
             }
             for item in items
         ]
@@ -1048,7 +1048,7 @@ class MemWal:
         data = await self._signed_request("POST", "/api/recall", {
             "query": query_text,
             "limit": limit,
-            "namespace": namespace or self._namespace,
+            "namespace": namespace if namespace is not None else self._namespace,
         })
         memories = [
             RecallMemory(
@@ -1118,7 +1118,7 @@ class MemWal:
         _reject_blank_text(text)
         body: Dict[str, Any] = {
             "text": text,
-            "namespace": namespace or self._namespace,
+            "namespace": namespace if namespace is not None else self._namespace,
         }
         wire_occurred_at = _occurred_at_to_wire(occurred_at)
         if wire_occurred_at is not None:
@@ -1219,7 +1219,7 @@ class MemWal:
         data = await self._signed_request("POST", "/api/ask", {
             "question": question,
             "limit": limit,
-            "namespace": namespace or self._namespace,
+            "namespace": namespace if namespace is not None else self._namespace,
         })
         memories = [
             AskMemory(blob_id=m["blob_id"], text=m["text"], distance=m["distance"])
@@ -1417,7 +1417,7 @@ class MemWal:
             {
                 "encrypted_data": opts.encrypted_data,
                 "vector": opts.vector,
-                "namespace": opts.namespace or self._namespace,
+                "namespace": opts.namespace if opts.namespace is not None else self._namespace,
             },
             include_seal_session=False,
         )
@@ -1443,7 +1443,7 @@ class MemWal:
         body: Dict[str, Any] = {
             "vector": opts.vector,
             "limit": opts.limit,
-            "namespace": opts.namespace or self._namespace,
+            "namespace": opts.namespace if opts.namespace is not None else self._namespace,
         }
         if opts.scoring_weights is not None:
             body["scoring_weights"] = opts.scoring_weights.to_wire()

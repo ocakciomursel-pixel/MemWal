@@ -65,6 +65,9 @@ class MemWalConfig:
             if self.server_url == DEFAULT_SERVER_URL:
                 self.server_url = preset
 
+        if not self.namespace:
+            raise ValueError("namespace cannot be empty")
+
 
 # ============================================================
 # API Response Types
