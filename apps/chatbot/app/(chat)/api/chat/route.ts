@@ -131,7 +131,24 @@ export async function POST(request: Request) {
       return new ChatbotError("rate_limit:chat").toResponse();
     }
 
-    const isToolApprovalFlow = Boolean(messages);
+    const hasToolApproval = Boolean(
+      messages?.some((msg) =>
+        msg.parts?.some(
+          (part: unknown) =>
+            typeof part === "object" &&
+            part !== null &&
+            "state" in part &&
+            ((part as { state: unknown }).state === "approval-responded" ||
+              (part as { state: unknown }).state === "output-denied")
+        )
+      )
+    );
+
+    if (messages && !hasToolApproval) {
+      return new ChatbotError("bad_request:api").toResponse();
+    }
+
+    const isToolApprovalFlow = Boolean(messages && hasToolApproval);
 
     const chat = await getChatById({ id });
     let messagesFromDb: DBMessage[] = [];
@@ -143,6 +160,13 @@ export async function POST(request: Request) {
       }
       if (!isToolApprovalFlow) {
         messagesFromDb = await getMessagesByChatId({ id });
+      } else {
+        messagesFromDb = await getMessagesByChatId({ id });
+        const dbMessageIds = new Set(messagesFromDb.map((m) => m.id));
+        const hasValidExistingMsg = messages.some((m) => dbMessageIds.has(m.id));
+        if (!hasValidExistingMsg) {
+          return new ChatbotError("bad_request:chat").toResponse();
+        }
       }
     } else if (message?.role === "user") {
       await saveChat({
@@ -152,6 +176,8 @@ export async function POST(request: Request) {
         visibility: selectedVisibilityType,
       });
       titlePromise = generateTitleFromUserMessage({ message });
+    } else {
+      return new ChatbotError("not_found:chat").toResponse();
     }
 
     const uiMessages = isToolApprovalFlow

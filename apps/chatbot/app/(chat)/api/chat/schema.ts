@@ -27,16 +27,23 @@ const messageSchema = z.object({
   parts: z.array(z.any()),
 });
 
-export const postRequestBodySchema = z.object({
-  id: z.string().uuid(),
-  // Either a single new message or all messages (for tool approvals)
-  message: userMessageSchema.optional(),
-  messages: z.array(messageSchema).optional(),
-  selectedChatModel: z.string(),
-  selectedVisibilityType: z.enum(["public", "private"]),
-  useMemWal: z.boolean().optional(),
-  memwalKey: z.string().optional(),
-  memwalAccountId: z.string().optional(),
-});
+export const postRequestBodySchema = z
+  .object({
+    id: z.string().uuid(),
+    // Either a single new message or all messages (for tool approvals)
+    message: userMessageSchema.optional(),
+    messages: z.array(messageSchema).optional(),
+    selectedChatModel: z.string(),
+    selectedVisibilityType: z.enum(["public", "private"]),
+    useMemWal: z.boolean().optional(),
+    memwalKey: z.string().optional(),
+    memwalAccountId: z.string().optional(),
+  })
+  .refine(
+    (data) => (data.message !== undefined) !== (data.messages !== undefined),
+    {
+      message: "Exactly one of 'message' or 'messages' must be provided",
+    }
+  );
 
 export type PostRequestBody = z.infer<typeof postRequestBodySchema>;
