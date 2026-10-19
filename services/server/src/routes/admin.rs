@@ -506,6 +506,11 @@ pub async fn version() -> Json<crate::compatibility::VersionResponse> {
 pub async fn get_config(State(state): State<Arc<AppState>>) -> Json<ConfigResponse> {
     Json(ConfigResponse {
         package_id: state.config.package_id.clone(),
+        registry_id: if state.config.registry_id.is_empty() {
+            None
+        } else {
+            Some(state.config.registry_id.clone())
+        },
         network: state.config.sui_network.clone(),
         // Keep the legacy endpoint in the response while SDK/server versions
         // roll independently. New SDKs prefer gRPC when advertised and fall
