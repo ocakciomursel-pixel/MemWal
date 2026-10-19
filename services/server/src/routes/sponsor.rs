@@ -237,6 +237,24 @@ fn validate_sponsor_transaction_kind(
         .parse::<sui_sdk_types::Address>()
         .map_err(|_| AppError::Internal("Invalid configured MemWal package ID".into()))?;
 
+    for command in &programmable.commands {
+        if let Command::MoveCall(call) = command {
+            if call.module.as_str() == "account"
+                && call.type_arguments.is_empty()
+                && matches!(
+                    call.function.as_str(),
+                    "create_account" | "add_delegate_key" | "remove_delegate_key"
+                )
+                && call.package != package
+            {
+                return Err(AppError::BadRequest(format!(
+                    "packageId {} is not the configured deployment (expected {package}); Transaction kind is not permitted for sponsorship",
+                    call.package
+                )));
+            }
+        }
+    }
+
     // Every command must be an allowlisted MemWal account call with no type
     // arguments. Anything else collapses the whole collect() to None, so one
     // foreign command rejects the entire transaction.

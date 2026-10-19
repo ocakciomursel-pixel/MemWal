@@ -112,8 +112,9 @@ interface SessionCacheEntry {
     expiresAt: number;
 }
 
-interface ServerConfig {
+export interface ServerConfig {
     packageId: string;
+    registryId?: string;
     network: string;
     suiRpcUrl?: string;
     suiGrpcUrl?: string;
@@ -1763,7 +1764,7 @@ export class MemWal {
             body.suiTransport !== "grpc" && body.suiTransport !== "jsonrpc") {
             throw new Error("GET /config response has invalid suiTransport");
         }
-        for (const field of ["suiGrpcUrl", "suiRpcUrl"] as const) {
+        for (const field of ["registryId", "suiGrpcUrl", "suiRpcUrl"] as const) {
             if (body[field] !== undefined && (typeof body[field] !== "string" || !body[field])) {
                 throw new Error(`GET /config response has invalid ${field}`);
             }
@@ -1781,12 +1782,22 @@ export class MemWal {
         }
         this.serverConfig = {
             packageId: body.packageId,
+            registryId: body.registryId as string | undefined,
             network: body.network,
             suiRpcUrl: body.suiRpcUrl as string | undefined,
             suiGrpcUrl: body.suiGrpcUrl as string | undefined,
             suiTransport: transport,
         };
         return this.serverConfig;
+    }
+
+    /**
+     * Fetch the relayer's public deployment configuration (`GET /config`),
+     * including `packageId`, `registryId`, and `network` (#1152).
+     */
+    async getConfig(): Promise<ServerConfig> {
+        const cfg = await this.fetchServerConfig();
+        return { ...cfg };
     }
 
     private async buildSealSessionInner(): Promise<string> {

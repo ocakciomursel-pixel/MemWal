@@ -2586,6 +2586,10 @@ pub struct PromptVersions {
 pub struct ConfigResponse {
     #[serde(rename = "packageId")]
     pub package_id: String,
+    /// Shared `AccountRegistry` object ID required by `account::create_account`
+    /// and `seal_approve` v1-new calls (#1152).
+    #[serde(rename = "registryId", skip_serializing_if = "Option::is_none")]
+    pub registry_id: Option<String>,
     pub network: String,
     #[serde(rename = "suiRpcUrl", skip_serializing_if = "Option::is_none")]
     pub sui_rpc_url: Option<String>,
@@ -3266,6 +3270,7 @@ mod tests {
     fn config_response_advertises_grpc_transport_compatibly() {
         let response = ConfigResponse {
             package_id: "0x1".into(),
+            registry_id: Some("0x2".into()),
             network: "testnet".into(),
             sui_rpc_url: Some("https://rpc.example".into()),
             sui_grpc_url: Some("https://grpc.example".into()),
@@ -3287,6 +3292,8 @@ mod tests {
             security_delete_expiry_margin_epochs: 1,
         };
         let json = serde_json::to_value(response).unwrap();
+        assert_eq!(json["packageId"], "0x1");
+        assert_eq!(json["registryId"], "0x2");
         assert_eq!(json["suiGrpcUrl"], "https://grpc.example");
         assert_eq!(json["suiTransport"], "grpc");
         assert_eq!(json["suiRpcUrl"], "https://rpc.example");
