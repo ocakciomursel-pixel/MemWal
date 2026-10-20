@@ -711,11 +711,21 @@ export class MemWal {
                 };
             }
             if (status.status === "failed") {
+                const errorStr = status.error ?? "unknown error";
+                const redacted = redactInternalUrls(errorStr);
+                const isRateLimited = /too many requests|rate limit|429/i.test(errorStr);
+                const isUpstreamUnavailable = /upstream.*unavailable|temporarily unavailable/i.test(errorStr);
+                const httpStatus = isRateLimited ? 429 : (isUpstreamUnavailable ? 503 : 500);
+                const retryAfterSeconds =
+                    status.retry_after_seconds
+                    ?? (isRateLimited || isUpstreamUnavailable ? 5 : undefined);
                 throw Object.assign(
-                    new Error(
-                        `remember job failed: ${redactInternalUrls(status.error ?? "unknown error")}`,
-                    ),
-                    { status: 500, jobId },
+                    new Error(`remember job failed: ${redacted}`),
+                    {
+                        status: httpStatus,
+                        jobId,
+                        ...(retryAfterSeconds !== undefined ? { retryAfterSeconds } : {}),
+                    },
                 );
             }
 
@@ -2139,6 +2149,11 @@ export class MemWal {
                 const retryAfter = Number(res.headers.get("retry-after"));
                 if (Number.isFinite(retryAfter) && retryAfter > 0) {
                     err.retryAfterSeconds = retryAfter;
+                } else {
+                    const fromBody = retryAfterSecondsFromBody(raw);
+                    if (fromBody !== undefined) {
+                        err.retryAfterSeconds = fromBody;
+                    }
                 }
                 // Preserve raw body on `cause` for in-process debugging only.
                 err.cause = raw;

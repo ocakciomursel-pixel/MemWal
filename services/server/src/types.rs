@@ -1881,6 +1881,8 @@ pub struct RememberBulkStatusItem {
     pub blob_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retry_after_seconds: Option<u64>,
 }
 
 /// POST /api/remember/bulk/status response.
@@ -1910,6 +1912,8 @@ pub struct RememberJobStatusResponse {
     pub blob_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retry_after_seconds: Option<u64>,
 }
 
 /// POST /api/remember (legacy sync response, kept for remember_manual)
@@ -2818,13 +2822,33 @@ impl axum::response::IntoResponse for AppError {
                 return (axum::http::StatusCode::GATEWAY_TIMEOUT, axum::Json(body)).into_response();
             }
             AppError::UpstreamUnavailable(msg) => {
-                // log the upstream details server-side, return
-                // 503 so the SDK / harness will retry per their
-                // transient-error policy. Body is a generic message —
-                // we don't leak internal upstream-provider names to
-                // clients.
                 let trace_id = crate::observability::current_request_id()
                     .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+                let msg_lower = msg.to_ascii_lowercase();
+                let is_rate_limit = msg_lower.contains("too many requests")
+                    || msg_lower.contains("rate limit")
+                    || msg_lower.contains("429");
+                if is_rate_limit {
+                    tracing::warn!(
+                        request_id = %trace_id,
+                        "Upstream rate limited: {}",
+                        msg,
+                    );
+                    let body = serde_json::json!({
+                        "error": format!("Upstream rate limit exceeded (traceId: {})", trace_id),
+                        "message": format!("Upstream rate limit exceeded (traceId: {})", trace_id),
+                        "code": "UPSTREAM_RATE_LIMITED",
+                        "retry_after_seconds": 5,
+                        "traceId": trace_id,
+                    });
+                    return (
+                        axum::http::StatusCode::TOO_MANY_REQUESTS,
+                        [(axum::http::header::RETRY_AFTER, "5")],
+                        axum::Json(body),
+                    )
+                        .into_response();
+                }
+
                 tracing::warn!(
                     request_id = %trace_id,
                     "Upstream unavailable: {}",
@@ -2868,6 +2892,8 @@ impl AppError {
 #[derive(Debug, Deserialize)]
 pub struct SidecarError {
     pub error: String,
+    #[serde(default)]
+    pub code: Option<String>,
 }
 
 // ============================================================
@@ -3568,6 +3594,23 @@ mod tests {
             resp.status(),
             axum::http::StatusCode::SERVICE_UNAVAILABLE,
             "UpstreamUnavailable MUST map to 503 so clients retry"
+        );
+    }
+
+    #[test]
+    fn app_error_upstream_unavailable_rate_limit_maps_to_429() {
+        let err = AppError::UpstreamUnavailable(
+            "seal encrypt failed: RpcError: Too Many Requests (traceId=abc)".into(),
+        );
+        let resp = axum::response::IntoResponse::into_response(err);
+        assert_eq!( 
+            resp.status(),
+            axum::http::StatusCode::TOO_MANY_REQUESTS,
+            "Upstream rate limit MUST map to 429"
+        );
+        assert_eq!(
+            resp.headers().get(axum::http::header::RETRY_AFTER).unwrap(),
+            "5"
         );
     }
 
