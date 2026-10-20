@@ -70,6 +70,7 @@ export interface RememberJobStatus {
     namespace?: string;
     blob_id?: string;
     error?: string;
+    retry_after_seconds?: number;
 }
 
 /** Result from rememberAndWait() / waitForRememberJob() */

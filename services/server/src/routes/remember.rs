@@ -155,7 +155,7 @@ async fn mark_remember_jobs_failed(state: &AppState, job_ids: &[String], msg: &s
         return;
     }
     let _ = sqlx::query(
-        "UPDATE remember_jobs SET status = 'failed', error_msg = $1, updated_at = NOW() WHERE id = ANY($2)",
+        "UPDATE remember_jobs SET status = 'failed', error_msg = $1, updated_at = NOW() WHERE id = ANY($2) AND status NOT IN ('done', 'uploaded')",
     )
     .bind(msg)
     .bind(job_ids)
@@ -177,7 +177,15 @@ fn spawn_prepare_remember_job(
     namespace: String,
     agent_public_key: String,
 ) {
-    let request_context = crate::observability::current_context();
+    let attempt_trace_id = uuid::Uuid::new_v4().to_string();
+    let request_context = crate::observability::current_context()
+        .map(|ctx| ctx.with_request_id(attempt_trace_id.clone()))
+        .unwrap_or_else(|| {
+            crate::observability::RequestContext::new(
+                attempt_trace_id,
+                "remember_prepare".to_string(),
+            )
+        });
     tokio::spawn(async move {
         let work = async move {
             let result: Result<(), AppError> = async {
@@ -307,11 +315,7 @@ fn spawn_prepare_remember_job(
             }
         };
 
-        if let Some(request_context) = request_context {
-            crate::observability::with_request_context(request_context, work).await;
-        } else {
-            work.await;
-        }
+        crate::observability::with_request_context(request_context, work).await;
     });
 }
 
@@ -322,7 +326,15 @@ fn spawn_prepare_bulk_remember_job(
     agent_public_key: String,
     pending_items: Vec<PendingBulkRememberItem>,
 ) {
-    let request_context = crate::observability::current_context();
+    let attempt_trace_id = uuid::Uuid::new_v4().to_string();
+    let request_context = crate::observability::current_context()
+        .map(|ctx| ctx.with_request_id(attempt_trace_id.clone()))
+        .unwrap_or_else(|| {
+            crate::observability::RequestContext::new(
+                attempt_trace_id,
+                "bulk_remember_prepare".to_string(),
+            )
+        });
     tokio::spawn(async move {
         let work = async move {
             let job_ids: Vec<String> = pending_items
@@ -465,11 +477,7 @@ fn spawn_prepare_bulk_remember_job(
             }
         };
 
-        if let Some(request_context) = request_context {
-            crate::observability::with_request_context(request_context, work).await;
-        } else {
-            work.await;
-        }
+        crate::observability::with_request_context(request_context, work).await;
     });
 }
 
@@ -1335,6 +1343,20 @@ pub async fn remember_status(
     let _ = owner_db; // already validated equal to auth.owner
 
     let error = sanitize_job_error_for_client(&status, error_msg);
+    let retry_after_seconds = if status == "failed" {
+        if let Some(ref err) = error {
+            let lower = err.to_ascii_lowercase();
+            if lower.contains("too many requests") || lower.contains("rate limit") || lower.contains("429") || lower.contains("upstream unavailable") {
+                Some(5)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
 
     Ok(Json(RememberJobStatusResponse {
         job_id: id,
@@ -1343,6 +1365,7 @@ pub async fn remember_status(
         namespace,
         blob_id,
         error,
+        retry_after_seconds,
     }))
 }
 
@@ -1514,14 +1537,34 @@ fn build_bulk_status_results(
 ) -> Vec<RememberBulkStatusItem> {
     let mut by_id = std::collections::HashMap::with_capacity(rows.len());
     for (id, _owner_db, status, blob_id, error_msg, namespace) in rows {
+        let error = sanitize_job_error_for_client(&status, error_msg);
+        let retry_after_seconds = if status == "failed" {
+            if let Some(ref err) = error {
+                let lower = err.to_ascii_lowercase();
+                if lower.contains("too many requests")
+                    || lower.contains("rate limit")
+                    || lower.contains("429")
+                    || lower.contains("upstream unavailable")
+                {
+                    Some(5)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
         by_id.insert(
             id.clone(),
             RememberBulkStatusItem {
                 job_id: id,
-                error: sanitize_job_error_for_client(&status, error_msg),
+                error,
                 status,
                 blob_id,
                 namespace: Some(namespace),
+                retry_after_seconds,
             },
         );
     }
@@ -1537,6 +1580,7 @@ fn build_bulk_status_results(
                 blob_id: None,
                 error: None,
                 namespace: None,
+                retry_after_seconds: None,
             });
         results.push(item);
     }

@@ -95,3 +95,27 @@ test("a bulk remember wait that only sees 429 throws instead of timing out", asy
         (err) => err.status === 429 && err.jobIds?.[0] === "job-1",
     );
 });
+
+test("waitForRememberJob surfaces 429 and retryAfterSeconds when job failed due to upstream rate limit", async () => {
+    stub((path) => {
+        if (path === "/api/remember/job-failed-429") {
+            return Response.json({
+                job_id: "job-failed-429",
+                status: "failed",
+                error: "seal encrypt failed: seal/encrypt failed during read_account_identity: RpcError: Too Many Requests (traceId=c63a4796- , timeoutMs=25000)",
+                retry_after_seconds: 5,
+            });
+        }
+        throw new Error(`unexpected request ${path}`);
+    });
+
+    await assert.rejects(
+        client().waitForRememberJob("job-failed-429", { pollIntervalMs: 1, timeoutMs: 400 }),
+        (err) => {
+            assert.strictEqual(err.status, 429);
+            assert.strictEqual(err.retryAfterSeconds, 5);
+            assert.match(err.message, /Too Many Requests/);
+            return true;
+        },
+    );
+});

@@ -175,16 +175,11 @@ pub async fn seal_encrypt(
         started.elapsed(),
     );
 
-    if !resp.status().is_success() {
+    let status = resp.status();
+    if !status.is_success() {
         crate::observability::record_sidecar_failure("seal_encrypt", "http_error");
         let body = resp.text().await.unwrap_or_default();
-        if let Ok(err) = serde_json::from_str::<SidecarError>(&body) {
-            return Err(AppError::Internal(format!(
-                "seal encrypt failed: {}",
-                err.error
-            )));
-        }
-        return Err(AppError::Internal(format!("seal encrypt failed: {}", body)));
+        return Err(classify_sidecar_seal_error("seal encrypt", status, &body));
     }
 
     let result: SealEncryptResponse = resp
@@ -203,6 +198,32 @@ pub async fn seal_encrypt(
     );
 
     Ok(encrypted_bytes)
+}
+
+fn classify_sidecar_seal_error(
+    operation: &'static str,
+    status: reqwest::StatusCode,
+    body: &str,
+) -> AppError {
+    let parsed = serde_json::from_str::<SidecarError>(body).ok();
+    let detail = parsed
+        .as_ref()
+        .map(|err| err.error.as_str())
+        .unwrap_or(body);
+    let lower = detail.to_ascii_lowercase();
+    let shared_unavailable = matches!(status.as_u16(), 429 | 503)
+        || parsed
+            .as_ref()
+            .and_then(|err| err.code.as_deref())
+            == Some("SHARED_SERVICE_UNAVAILABLE")
+        || lower.contains("too many requests")
+        || lower.contains("rate limit");
+    let msg = format!("{operation} failed: {detail}");
+    if shared_unavailable {
+        AppError::UpstreamUnavailable(msg)
+    } else {
+        AppError::Internal(msg)
+    }
 }
 
 /// Decrypt SEAL-encrypted data via the sidecar.
@@ -264,16 +285,11 @@ pub async fn seal_decrypt(
         started.elapsed(),
     );
 
-    if !resp.status().is_success() {
+    let status = resp.status();
+    if !status.is_success() {
         crate::observability::record_sidecar_failure("seal_decrypt", "http_error");
         let body = resp.text().await.unwrap_or_default();
-        if let Ok(err) = serde_json::from_str::<SidecarError>(&body) {
-            return Err(AppError::Internal(format!(
-                "seal decrypt failed: {}",
-                err.error
-            )));
-        }
-        return Err(AppError::Internal(format!("seal decrypt failed: {}", body)));
+        return Err(classify_sidecar_seal_error("seal decrypt", status, &body));
     }
 
     let result: SealDecryptResponse = resp
@@ -415,21 +431,11 @@ pub async fn seal_decrypt_batch(
     if !status.is_success() {
         crate::observability::record_sidecar_failure("seal_decrypt_batch", "http_error");
         let body_text = resp.text().await.unwrap_or_default();
-        let detail = serde_json::from_str::<SidecarError>(&body_text)
-            .map(|err| err.error)
-            .unwrap_or(body_text);
-        // 503 is the sidecar's shared-outage signal. Recall retries that;
-        // Internal becomes a non-retryable 500.
-        if status.as_u16() == 503 {
-            return Err(AppError::UpstreamUnavailable(format!(
-                "seal decrypt-batch failed: {}",
-                detail
-            )));
-        }
-        return Err(AppError::Internal(format!(
-            "seal decrypt-batch failed: {}",
-            detail
-        )));
+        return Err(classify_sidecar_seal_error(
+            "seal decrypt-batch",
+            status,
+            &body_text,
+        ));
     }
 
     let batch_resp: SealDecryptBatchResponse = resp.json().await.map_err(|e| {

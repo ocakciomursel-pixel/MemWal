@@ -48,6 +48,28 @@ pub struct RequestContext {
     started: Instant,
 }
 
+impl RequestContext {
+    pub fn new(request_id: String, route: String) -> Self {
+        Self {
+            request_id,
+            route,
+            started: Instant::now(),
+        }
+    }
+
+    pub fn with_request_id(&self, request_id: String) -> Self {
+        Self {
+            request_id,
+            route: self.route.clone(),
+            started: self.started,
+        }
+    }
+
+    pub fn request_id(&self) -> &str {
+        &self.request_id
+    }
+}
+
 tokio::task_local! {
     static REQUEST_CONTEXT: RequestContext;
 }
