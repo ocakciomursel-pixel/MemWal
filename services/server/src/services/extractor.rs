@@ -272,7 +272,7 @@ impl LlmExtractor {
                     "transport_error",
                     started.elapsed(),
                 );
-                AppError::Internal(format!("LLM API request failed: {}", e))
+                AppError::UpstreamUnavailable(format!("LLM API request failed: {}", e))
             })?;
         let status_label = resp.status().as_u16().to_string();
         crate::observability::observe_external(

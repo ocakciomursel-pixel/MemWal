@@ -731,7 +731,7 @@ pub async fn ask(
             "transport_error",
             started.elapsed(),
         );
-        AppError::Internal(format!("LLM request failed: {}", e))
+        AppError::UpstreamUnavailable(format!("LLM request failed: {}", e))
     })?;
     let status_label = resp.status().as_u16().to_string();
     crate::observability::observe_external(
@@ -744,6 +744,12 @@ pub async fn ask(
     if !resp.status().is_success() {
         let status = resp.status();
         let body_text = resp.text().await.unwrap_or_default();
+        if crate::services::extractor::is_upstream_status_transient(status) {
+            return Err(AppError::UpstreamUnavailable(format!(
+                "LLM upstream error ({}): {}",
+                status, body_text
+            )));
+        }
         return Err(AppError::Internal(format!(
             "LLM error ({}): {}",
             status, body_text
