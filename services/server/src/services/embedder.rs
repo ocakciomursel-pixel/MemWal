@@ -127,7 +127,7 @@ async fn embed_text(
                         "transport_error",
                         started.elapsed(),
                     );
-                    AppError::Internal(format!("Embedding API request failed: {}", e))
+                    AppError::UpstreamUnavailable(format!("Embedding API request failed: {}", e))
                 })?;
             let status_label = resp.status().as_u16().to_string();
             crate::observability::observe_external(
@@ -182,15 +182,22 @@ async fn embed_text(
             }
 
             let api_resp: EmbeddingApiResponse = serde_json::from_str(&body).map_err(|e| {
-                AppError::Internal(format!("Failed to parse embedding response: {}", e))
+                AppError::UpstreamUnavailable(format!("Failed to parse embedding response: {}", e))
             })?;
 
             let vector = api_resp
                 .data
                 .into_iter()
                 .next()
-                .ok_or_else(|| AppError::Internal("Embedding API returned no data".into()))?
+                .ok_or_else(|| {
+                    AppError::UpstreamUnavailable("Embedding API returned no data".into())
+                })?
                 .embedding;
+            if vector.is_empty() {
+                return Err(AppError::UpstreamUnavailable(
+                    "Embedding API returned an empty embedding vector".into(),
+                ));
+            }
             Ok(vector)
         }
         None => {
@@ -372,5 +379,41 @@ mod tests {
                 "{body} → {result:?}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn upstream_5xx_or_429_or_degraded_200_maps_to_upstream_unavailable() {
+        for (status, body) in [
+            (429, r#"{"error":{"message":"Rate limit reached"}}"#),
+            (502, "<html>502 Bad Gateway</html>"),
+            (503, r#"{"error":{"message":"Service temporarily unavailable"}}"#),
+            (504, "Gateway Timeout"),
+            (200, r#"{"error":{"message":"The operation was aborted","code":504}}"#),
+            (200, r#"{"data":[]}"#),
+            (200, r#"{"data":[{"embedding":[]}]}"#),
+            (200, "<html>upstream gateway error wrapped in 200</html>"),
+        ] {
+            let (base, _) = stub_provider(status, body).await;
+            let result = super::embed_text(&reqwest::Client::new(), Some("key"), &base, "q").await;
+            assert!(
+                matches!(result, Err(crate::types::AppError::UpstreamUnavailable(_))),
+                "status={status} body={body} → {result:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn transport_error_maps_to_upstream_unavailable() {
+        let result = super::embed_text(
+            &reqwest::Client::new(),
+            Some("key"),
+            "http://127.0.0.1:9",
+            "q",
+        )
+        .await;
+        assert!(
+            matches!(result, Err(crate::types::AppError::UpstreamUnavailable(_))),
+            "transport failure must map to UpstreamUnavailable (503), got: {result:?}"
+        );
     }
 }

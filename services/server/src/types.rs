@@ -2830,10 +2830,18 @@ impl axum::response::IntoResponse for AppError {
                     "Upstream unavailable: {}",
                     msg,
                 );
-                (
+                let message = format!("Upstream temporarily unavailable (traceId: {})", trace_id);
+                let body = serde_json::json!({
+                    "error": message,
+                    "message": message,
+                    "code": "upstream_inference_unavailable",
+                    "traceId": trace_id,
+                });
+                return (
                     axum::http::StatusCode::SERVICE_UNAVAILABLE,
-                    format!("Upstream temporarily unavailable (traceId: {})", trace_id),
+                    axum::Json(body),
                 )
+                    .into_response();
             }
         };
 
@@ -3555,8 +3563,8 @@ mod tests {
         assert_eq!(resp.status(), axum::http::StatusCode::PAYMENT_REQUIRED);
     }
 
-    #[test]
-    fn app_error_upstream_unavailable_status_is_503_for_retryability() {
+    #[tokio::test]
+    async fn app_error_upstream_unavailable_status_is_503_for_retryability() {
         // HTTP 503 is in the SDK + benchmark harness retry
         // set (429, 502, 503, 504). Pinning this so a future change
         // can't silently re-map UpstreamUnavailable to a non-retryable
@@ -3569,6 +3577,11 @@ mod tests {
             axum::http::StatusCode::SERVICE_UNAVAILABLE,
             "UpstreamUnavailable MUST map to 503 so clients retry"
         );
+        let body_bytes = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+        assert_eq!(body["code"], "upstream_inference_unavailable");
+        assert_eq!(body["error"], body["message"]);
+        assert!(body["traceId"].as_str().is_some());
     }
 
     #[test]
